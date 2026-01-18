@@ -1,5 +1,5 @@
 import { chromium, Browser, BrowserContext, Page, BrowserType } from 'playwright';
-import { BrowserConfig } from '../types';
+import { BrowserConfig, CookieData } from '../types';
 import { BrowserInitializationError } from '../errors';
 
 /**
@@ -35,10 +35,32 @@ export class BrowserManager {
       return;
     }
 
+    // Try to use system Chrome first (better for avoiding detection), fallback to Chromium
+    const launchOptions = {
+      headless: this.config.headless,
+      args: [
+        '--disable-blink-features=AutomationControlled',
+        '--disable-dev-shm-usage',
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+      ],
+    };
+
     try {
-      this.browser = await chromium.launch({
-        headless: this.config.headless,
-      });
+      // Try with system Chrome if not headless
+      if (!this.config.headless) {
+        try {
+          this.browser = await chromium.launch({
+            ...launchOptions,
+            channel: 'chrome',
+          });
+        } catch {
+          // Fallback to Chromium if Chrome not available
+          this.browser = await chromium.launch(launchOptions);
+        }
+      } else {
+        this.browser = await chromium.launch(launchOptions);
+      }
     } catch (error) {
       throw new BrowserInitializationError(
         `Failed to launch browser: ${error instanceof Error ? error.message : String(error)}`
@@ -49,9 +71,10 @@ export class BrowserManager {
   /**
    * Create a new browser context with the given identifier
    * @param id - Unique identifier for the context
+   * @param cookies - Optional cookies to add to the context
    * @returns The created BrowserContext
    */
-  async createContext(id: string): Promise<BrowserContext> {
+  async createContext(id: string, cookies?: CookieData[]): Promise<BrowserContext> {
     if (!this.browser) {
       await this.initialize();
     }
@@ -67,6 +90,64 @@ export class BrowserManager {
       },
       userAgent: this.config.userAgent,
       bypassCSP: this.config.bypassCSP,
+      // Remove automation indicators
+      ignoreHTTPSErrors: false,
+      javaScriptEnabled: true,
+    });
+
+    // Add cookies if provided
+    if (cookies && cookies.length > 0) {
+      // Convert CookieData to Playwright Cookie format
+      const playwrightCookies = cookies
+        .filter((cookie) => {
+          // Filter out expired cookies
+          if (cookie.expires && cookie.expires < Date.now() / 1000) {
+            return false;
+          }
+          return true;
+        })
+        .map((cookie) => ({
+          name: cookie.name,
+          value: cookie.value,
+          domain: cookie.domain,
+          path: cookie.path || '/',
+          expires: cookie.expires,
+          httpOnly: cookie.httpOnly || false,
+          secure: cookie.secure || false,
+          sameSite: cookie.sameSite || 'Lax',
+        }));
+
+      if (playwrightCookies.length > 0) {
+        // Add cookies to the context
+        await context.addCookies(playwrightCookies);
+      }
+    }
+
+    // Remove webdriver property to avoid detection
+    await context.addInitScript(() => {
+      // @ts-ignore - This code runs in browser context
+      Object.defineProperty(navigator, 'webdriver', {
+        get: () => false,
+      });
+      
+      // Override chrome object
+      // @ts-ignore - This code runs in browser context
+      window.chrome = {
+        runtime: {},
+      };
+      
+      // Override permissions
+      // @ts-ignore - This code runs in browser context
+      const originalQuery = window.navigator.permissions.query;
+      // @ts-ignore - This code runs in browser context
+      window.navigator.permissions.query = (parameters: any) => {
+        // @ts-ignore - This code runs in browser context
+        if (parameters.name === 'notifications') {
+          // @ts-ignore - This code runs in browser context
+          return Promise.resolve({ state: Notification.permission } as any);
+        }
+        return originalQuery(parameters);
+      };
     });
 
     context.setDefaultTimeout(this.config.timeout);
@@ -78,23 +159,25 @@ export class BrowserManager {
   /**
    * Get an existing context or create a new one
    * @param id - Context identifier
+   * @param cookies - Optional cookies to add to the context
    * @returns The BrowserContext
    */
-  async getContext(id: string): Promise<BrowserContext> {
+  async getContext(id: string, cookies?: CookieData[]): Promise<BrowserContext> {
     if (this.contexts.has(id)) {
       return this.contexts.get(id)!;
     }
-    return this.createContext(id);
+    return this.createContext(id, cookies);
   }
 
   /**
    * Create a new page in the specified context
    * @param contextId - Context identifier
    * @param pageId - Page identifier
+   * @param cookies - Optional cookies to add to the context
    * @returns The created Page
    */
-  async openPage(contextId: string, pageId: string): Promise<Page> {
-    const context = await this.getContext(contextId);
+  async openPage(contextId: string, pageId: string, cookies?: CookieData[]): Promise<Page> {
+    const context = await this.getContext(contextId, cookies);
 
     if (this.pages.has(pageId)) {
       const page = this.pages.get(pageId)!;

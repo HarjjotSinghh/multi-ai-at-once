@@ -1,5 +1,5 @@
 import { BrowserManager } from '../browser/BrowserManager';
-import { AIServiceName, IAIService } from '../types';
+import { AIServiceName, IAIService, CookieData } from '../types';
 import { ChatGPTAdapter } from './chatgpt/ChatGPTAdapter';
 import { ClaudeAdapter } from './claude/ClaudeAdapter';
 import { GeminiAdapter } from './gemini/GeminiAdapter';
@@ -13,9 +13,11 @@ import { ZaiAdapter } from './zai/ZaiAdapter';
  */
 export class ServiceFactory {
   private browserManager: BrowserManager;
+  private cookiesMap: Map<AIServiceName, CookieData[]>;
 
-  constructor(browserManager: BrowserManager) {
+  constructor(browserManager: BrowserManager, cookiesMap?: Map<AIServiceName, CookieData[]>) {
     this.browserManager = browserManager;
+    this.cookiesMap = cookiesMap || new Map();
   }
 
   /**
@@ -25,21 +27,23 @@ export class ServiceFactory {
    * @returns The created service adapter
    */
   createService(serviceName: AIServiceName, contextId?: string): IAIService {
+    const cookies = this.cookiesMap.get(serviceName);
+    
     switch (serviceName) {
       case 'chatgpt':
-        return new ChatGPTAdapter(this.browserManager, contextId);
+        return new ChatGPTAdapter(this.browserManager, contextId, cookies);
       case 'claude':
-        return new ClaudeAdapter(this.browserManager, contextId);
+        return new ClaudeAdapter(this.browserManager, contextId, cookies);
       case 'gemini':
-        return new GeminiAdapter(this.browserManager, contextId);
+        return new GeminiAdapter(this.browserManager, contextId, cookies);
       case 'perplexity':
-        return new PerplexityAdapter(this.browserManager, contextId);
+        return new PerplexityAdapter(this.browserManager, contextId, cookies);
       case 'grok':
-        return new GrokAdapter(this.browserManager, contextId);
+        return new GrokAdapter(this.browserManager, contextId, cookies);
       case 'deepseek':
-        return new DeepSeekAdapter(this.browserManager, contextId);
+        return new DeepSeekAdapter(this.browserManager, contextId, cookies);
       case 'zai':
-        return new ZaiAdapter(this.browserManager, contextId);
+        return new ZaiAdapter(this.browserManager, contextId, cookies);
       default:
         throw new Error(`Unknown service: ${serviceName}`);
     }

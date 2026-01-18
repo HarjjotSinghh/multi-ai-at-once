@@ -1,5 +1,5 @@
 import { Page } from 'playwright';
-import { IAIService, AIServiceName, ServiceSelectors, AIResponse, ResponseStatus } from '../../types';
+import { IAIService, AIServiceName, ServiceSelectors, AIResponse, ResponseStatus, CookieData } from '../../types';
 import { BrowserManager } from '../../browser/BrowserManager';
 import {
   ElementNotFoundError,
@@ -18,6 +18,8 @@ export abstract class AIServiceAdapter implements IAIService {
   protected contextId: string;
   protected pageId: string;
   protected selectors: ServiceSelectors;
+  protected cookies: CookieData[] | null = null;
+  protected hasStoredCookies: boolean = false;
 
   readonly serviceName: AIServiceName;
   readonly baseUrl: string;
@@ -26,7 +28,8 @@ export abstract class AIServiceAdapter implements IAIService {
     serviceName: AIServiceName,
     selectors: ServiceSelectors,
     browserManager: BrowserManager,
-    contextId?: string
+    contextId?: string,
+    cookies?: CookieData[]
   ) {
     this.serviceName = serviceName;
     this.baseUrl = selectors.url;
@@ -34,6 +37,8 @@ export abstract class AIServiceAdapter implements IAIService {
     this.browserManager = browserManager;
     this.contextId = contextId || `${serviceName}-context`;
     this.pageId = `${serviceName}-page`;
+    this.cookies = cookies ?? null;
+    this.hasStoredCookies = cookies !== undefined && cookies !== null && cookies.length > 0;
   }
 
   /**
@@ -41,11 +46,200 @@ export abstract class AIServiceAdapter implements IAIService {
    */
   async initialize(): Promise<void> {
     if (!this.page || this.page.isClosed()) {
-      this.page = await this.browserManager.openPage(this.contextId, this.pageId);
+      this.page = await this.browserManager.openPage(this.contextId, this.pageId, this.cookies || undefined);
     }
 
     await this.page.goto(this.baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    
+    // Only wait for login if we don't have stored cookies
+    if (!this.hasStoredCookies) {
+      await this.waitForLogin();
+    }
+    
     await this.waitForReady();
+  }
+
+  /**
+   * Wait for user to complete login if on a login page
+   * Checks for common login indicators and waits until user is authenticated
+   */
+  protected async waitForLogin(): Promise<void> {
+    if (!this.page) {
+      throw new PageOperationError('Page not initialized', this.serviceName);
+    }
+
+    // Wait a bit for page to fully load
+    await this.page.waitForTimeout(2000);
+
+    // Check if we're on a login page or error page using JavaScript evaluation
+    const isLoginPage = await this.page.evaluate(() => {
+      // @ts-ignore - This code runs in browser context
+      const bodyText = document.body.textContent?.toLowerCase() || '';
+      // @ts-ignore - This code runs in browser context
+      const url = window.location.href.toLowerCase();
+      // @ts-ignore - This code runs in browser context
+      const pageTitle = document.title?.toLowerCase() || '';
+      
+      // Check for Google's specific error messages
+      const hasGoogleError = 
+        bodyText.includes("couldn't sign you in") ||
+        bodyText.includes('this browser or app may not be secure') ||
+        bodyText.includes('browser or app may not be secure') ||
+        url.includes('/signin/rejected') ||
+        url.includes('/signin/challenge');
+      
+      // Check for login-related text
+      const hasLoginText = 
+        bodyText.includes('sign in') ||
+        bodyText.includes('log in') ||
+        bodyText.includes('login') ||
+        bodyText.includes('sign up') ||
+        bodyText.includes('continue with google') ||
+        bodyText.includes('continue with email') ||
+        pageTitle.includes('sign in') ||
+        pageTitle.includes('log in');
+      
+      // Check for login-related URL paths
+      const hasLoginPath = 
+        url.includes('/login') ||
+        url.includes('/signin') ||
+        url.includes('/sign-in') ||
+        url.includes('/auth') ||
+        url.includes('/account') ||
+        url.includes('accounts.google.com');
+      
+      // Check for login form elements
+      // @ts-ignore - This code runs in browser context
+      const hasLoginForm = 
+        // @ts-ignore - This code runs in browser context
+        document.querySelector('input[type="email"]') !== null ||
+        // @ts-ignore - This code runs in browser context
+        document.querySelector('input[type="password"]') !== null ||
+        // @ts-ignore - This code runs in browser context
+        document.querySelector('form')?.querySelector('input[type="password"]') !== null;
+      
+      return hasGoogleError || hasLoginText || hasLoginPath || hasLoginForm;
+    });
+
+    if (isLoginPage) {
+      // Wait for the ready selector to appear, which indicates successful login
+      // Poll every 2 seconds to check if user has logged in
+      const maxWaitTime = 300000; // 5 minutes
+      const pollInterval = 2000; // 2 seconds
+      const startTime = Date.now();
+      let lastUrl = this.page.url();
+      
+      while (Date.now() - startTime < maxWaitTime) {
+        try {
+          // Check if URL changed (user might have navigated)
+          const currentUrl = this.page.url();
+          if (currentUrl !== lastUrl) {
+            lastUrl = currentUrl;
+            // Wait a bit for new page to load
+            await this.page.waitForTimeout(1000);
+          }
+
+          // Try to find the ready selector
+          const readyElement = await this.page.$(this.selectors.readySelector || this.selectors.textareaSelector);
+          if (readyElement) {
+            const isVisible = await readyElement.isVisible().catch(() => false);
+            if (isVisible) {
+              // Check if we're still on a login page or error page
+              const stillOnLoginPage = await this.page.evaluate(() => {
+                // @ts-ignore - This code runs in browser context
+                const bodyText = document.body.textContent?.toLowerCase() || '';
+                // @ts-ignore - This code runs in browser context
+                const url = window.location.href.toLowerCase();
+                return (
+                  bodyText.includes("couldn't sign you in") ||
+                  bodyText.includes('this browser or app may not be secure') ||
+                  bodyText.includes('sign in') ||
+                  bodyText.includes('log in') ||
+                  url.includes('/login') ||
+                  url.includes('/signin') ||
+                  url.includes('/signin/rejected') ||
+                  url.includes('/signin/challenge')
+                );
+              });
+              
+              if (!stillOnLoginPage) {
+                // User has logged in successfully
+                return;
+              }
+            }
+          }
+          
+          // Also check if we navigated away from login page to the main app
+          const currentUrlLower = currentUrl.toLowerCase();
+          if (!currentUrlLower.includes('/login') && 
+              !currentUrlLower.includes('/signin') && 
+              !currentUrlLower.includes('/signin/rejected') &&
+              !currentUrlLower.includes('/signin/challenge') &&
+              !currentUrlLower.includes('accounts.google.com')) {
+            // Might have navigated to the main app, check for ready selector
+            try {
+              await this.page.waitForSelector(
+                this.selectors.readySelector || this.selectors.textareaSelector,
+                { timeout: 3000, state: 'visible' }
+              );
+              return; // Found ready selector, login successful
+            } catch {
+              // Continue polling
+            }
+          }
+        } catch {
+          // Continue polling
+        }
+        
+        // Wait before next check
+        await this.page.waitForTimeout(pollInterval);
+      }
+      
+      // Timeout - check if still on login page or error page
+      const stillOnLoginPage = await this.page.evaluate(() => {
+        // @ts-ignore - This code runs in browser context
+        const bodyText = document.body.textContent?.toLowerCase() || '';
+        // @ts-ignore - This code runs in browser context
+        const url = window.location.href.toLowerCase();
+        return (
+          bodyText.includes("couldn't sign you in") ||
+          bodyText.includes('this browser or app may not be secure') ||
+          bodyText.includes('sign in') ||
+          bodyText.includes('log in') ||
+          url.includes('/login') ||
+          url.includes('/signin') ||
+          url.includes('/signin/rejected') ||
+          url.includes('/signin/challenge')
+        );
+      });
+
+      if (stillOnLoginPage) {
+        // Check if it's a Google security error
+        const isGoogleError = await this.page.evaluate(() => {
+          // @ts-ignore - This code runs in browser context
+          const bodyText = document.body.textContent?.toLowerCase() || '';
+          // @ts-ignore - This code runs in browser context
+          const url = window.location.href.toLowerCase();
+          return (
+            bodyText.includes("couldn't sign you in") ||
+            bodyText.includes('this browser or app may not be secure') ||
+            url.includes('/signin/rejected')
+          );
+        });
+
+        if (isGoogleError) {
+          throw new PageOperationError(
+            `Google security check detected: Please manually sign in to ${this.serviceName} in the browser window. You may need to click "Try again" or use a different authentication method. The automation will wait up to 5 minutes for you to complete login.`,
+            this.serviceName
+          );
+        } else {
+          throw new PageOperationError(
+            `Login timeout: Please log in to ${this.serviceName} in the browser window. The automation will wait up to 5 minutes for you to complete login.`,
+            this.serviceName
+          );
+        }
+      }
+    }
   }
 
   /**
@@ -144,7 +338,20 @@ export abstract class AIServiceAdapter implements IAIService {
     if (!textarea) {
       throw new ElementNotFoundError(this.selectors.textareaSelector, this.serviceName);
     }
-    await textarea.fill(prompt);
+
+    // Check if it's a contenteditable div - need to handle differently
+    const tagName = await textarea.evaluate((el) => el.tagName.toLowerCase());
+    const isContentEditable = await textarea.evaluate((el) => 'contentEditable' in el && (el as any).contentEditable === 'true');
+
+    if (isContentEditable || tagName === 'div') {
+      // For contenteditable divs, use type() or set textContent
+      await textarea.click();
+      await textarea.fill('');
+      await textarea.type(prompt, { delay: 0 });
+    } else {
+      // For textareas and inputs, use fill()
+      await textarea.fill(prompt);
+    }
   }
 
   /**

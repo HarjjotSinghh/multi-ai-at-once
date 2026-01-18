@@ -9,3 +9,6 @@ dist
 .env.development
 .env.test
 .env.production
+.next
+.vercel
+next-env.d.ts

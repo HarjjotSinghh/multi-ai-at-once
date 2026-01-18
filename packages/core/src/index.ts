@@ -22,3 +22,4 @@ export { ZaiAdapter } from './services/zai/ZaiAdapter';
 
 // Config
 export { ConfigManager } from './config/ConfigManager';
+export { CookieManager } from './config/CookieManager';

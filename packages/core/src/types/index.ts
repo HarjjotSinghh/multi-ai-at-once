@@ -245,3 +245,73 @@ export interface PromptOptions {
    */
   waitForAll?: boolean;
 }
+
+/**
+ * Cookie data structure for browser authentication
+ */
+export interface CookieData {
+  /**
+   * Cookie name
+   */
+  name: string;
+
+  /**
+   * Cookie value
+   */
+  value: string;
+
+  /**
+   * Domain the cookie belongs to
+   */
+  domain: string;
+
+  /**
+   * Path the cookie is valid for
+   */
+  path?: string;
+
+  /**
+   * Expiration timestamp (Unix time in seconds)
+   */
+  expires?: number;
+
+  /**
+   * Whether cookie is HTTP-only
+   */
+  httpOnly?: boolean;
+
+  /**
+   * Whether cookie is secure (HTTPS only)
+   */
+  secure?: boolean;
+
+  /**
+   * SameSite attribute
+   */
+  sameSite?: 'Strict' | 'Lax' | 'None';
+}
+
+/**
+ * Service-specific authentication cookies
+ */
+export interface ServiceCookies {
+  /**
+   * Service name
+   */
+  service: AIServiceName;
+
+  /**
+   * Array of cookies for this service
+   */
+  cookies: CookieData[];
+
+  /**
+   * Optional headers to include with requests
+   */
+  headers?: Record<string, string>;
+
+  /**
+   * Last updated timestamp
+   */
+  lastUpdated?: number;
+}

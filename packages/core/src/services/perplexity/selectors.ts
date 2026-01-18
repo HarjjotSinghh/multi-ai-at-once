@@ -2,9 +2,9 @@ import { ServiceSelectors } from '../../types';
 
 export const PERPLEXITY_SELECTORS: ServiceSelectors = {
   url: 'https://www.perplexity.ai/',
-  textareaSelector: 'textarea[placeholder*="ask"]',
+  textareaSelector: '[role="textbox"]',
   submitSelector: 'button[type="submit"]',
   responseSelector: '.answer-content',
-  readySelector: 'textarea[placeholder*="ask"]',
+  readySelector: '[role="textbox"]',
   loadingSelector: '.loading-spinner',
 };

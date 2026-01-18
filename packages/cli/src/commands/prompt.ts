@@ -4,10 +4,12 @@ import chalk from 'chalk';
 import {
   BrowserManager,
   ConfigManager,
+  CookieManager,
   ServiceFactory,
   AIServiceName,
   AIResponse,
   MultiAIConfig,
+  CookieData,
 } from '@multi-ai/core';
 import { displayTable, displayJSON, displayMarkdown } from '../ui/table';
 
@@ -68,11 +70,62 @@ export async function handlePrompt(prompt: string, options: PromptOptions): Prom
 
     spinner.text = `Initializing ${services.length} service(s)...`;
 
-    const factory = new ServiceFactory(browserManager);
+    // Load cookies for services
+    const cookieManager = new CookieManager();
+    const cookiesMap = new Map<AIServiceName, CookieData[]>();
+    
+    for (const service of services) {
+      const serviceCookies = await cookieManager.getCookies(service);
+      if (serviceCookies && serviceCookies.cookies.length > 0) {
+        cookiesMap.set(service, serviceCookies.cookies);
+      }
+    }
+
+    const factory = new ServiceFactory(browserManager, cookiesMap);
     const aiServices = factory.createServices(services);
 
-    // Initialize all services
-    await Promise.all(aiServices.map((service) => service.initialize()));
+    // Show login instructions only if cookies are missing
+    const servicesWithoutCookies = services.filter((service) => !cookiesMap.has(service));
+    if (servicesWithoutCookies.length > 0) {
+      console.log('');
+      console.log(chalk.yellow.bold('⚠️  Login Required'));
+      console.log(chalk.yellow('Browser windows will open for the following services:'));
+      servicesWithoutCookies.forEach((service) => {
+        console.log(chalk.yellow(`  • ${service.charAt(0).toUpperCase() + service.slice(1)}`));
+      });
+      console.log('');
+      console.log(chalk.cyan('📝 Instructions:'));
+      console.log(chalk.cyan('  1. Log in to each service in the browser windows'));
+      console.log(chalk.cyan('  2. If you see "This browser may not be secure" errors:'));
+      console.log(chalk.cyan('     - Click "Try again" button'));
+      console.log(chalk.cyan('     - Or manually navigate to the service URL and log in'));
+      console.log(chalk.cyan('  3. The automation will automatically detect when you\'re logged in'));
+      console.log(chalk.cyan('  4. You have up to 5 minutes to complete login'));
+      console.log('');
+      console.log(chalk.gray('💡 Tip: Use "multi-ai config cookies import" to save cookies and skip login next time'));
+      console.log('');
+    } else {
+      console.log('');
+      console.log(chalk.green('✓ Using stored cookies for authentication'));
+      console.log('');
+    }
+
+    // Initialize all services (this will wait for login only if cookies are missing)
+    spinner.text = servicesWithoutCookies.length > 0 ? 'Waiting for login...' : 'Initializing services...';
+    try {
+      await Promise.all(aiServices.map((service) => service.initialize()));
+      spinner.succeed('All services initialized and logged in');
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('log in')) {
+        spinner.fail('Login timeout or incomplete');
+        console.error(chalk.red(error.message));
+        console.log('');
+        console.log(chalk.yellow('Please ensure you are logged in to all services and try again.'));
+        await browserManager.close();
+        process.exit(1);
+      }
+      throw error;
+    }
 
     spinner.text = `Sending prompt to ${services.length} service(s)...`;
 
