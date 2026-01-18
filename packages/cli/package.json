@@ -1,0 +1,32 @@
+{
+  "name": "@multi-ai/cli",
+  "version": "1.0.0",
+  "description": "CLI interface for multi-AI prompt platform",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "multi-ai": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "dev": "tsc --watch",
+    "cli": "node dist/index.js"
+  },
+  "keywords": ["ai", "cli", "automation"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@multi-ai/core": "workspace:*",
+    "chalk": "^4.1.2",
+    "cli-table3": "^0.6.5",
+    "commander": "^12.1.0",
+    "inquirer": "^8.2.6",
+    "ora": "^5.4.1"
+  },
+  "devDependencies": {
+    "@types/inquirer": "^8.2.10",
+    "@types/node": "^22.10.5",
+    "typescript": "^5.7.3"
+  }
+}
