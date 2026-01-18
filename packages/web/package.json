@@ -8,32 +8,45 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "clean": "rm -rf .next"
+    "clean": "rm -rf .next",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "drizzle-kit push",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio"
   },
-  "keywords": ["ai", "nextjs", "web"],
+  "keywords": [
+    "ai",
+    "nextjs",
+    "web"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
     "@multi-ai/core": "workspace:*",
+    "bcrypt-ts": "^4.0.1",
+    "better-auth": "^1.4.15",
+    "clsx": "^2.1.1",
+    "drizzle-orm": "^0.41.0",
+    "lucide-react": "^0.468.0",
     "next": "^15.1.3",
+    "postgres": "^3.4.8",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "zustand": "^5.0.2",
     "react-markdown": "^9.0.1",
     "remark-gfm": "^4.0.0",
-    "clsx": "^2.1.1",
     "tailwind-merge": "^2.6.0",
-    "lucide-react": "^0.468.0"
+    "zustand": "^5.0.2"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
-    "typescript": "^5.7.3",
-    "tailwindcss": "^3.4.17",
-    "postcss": "^8.4.49",
     "autoprefixer": "^10.4.20",
+    "drizzle-kit": "^0.31.8",
     "eslint": "^9.17.0",
-    "eslint-config-next": "^15.1.3"
+    "eslint-config-next": "^15.1.3",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.3"
   }
 }

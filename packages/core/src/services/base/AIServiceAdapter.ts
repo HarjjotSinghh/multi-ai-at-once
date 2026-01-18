@@ -50,13 +50,17 @@ export abstract class AIServiceAdapter implements IAIService {
     }
 
     await this.page.goto(this.baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    console.log(`[${this.serviceName}] Navigated to ${this.baseUrl}`);
     
     // Only wait for login if we don't have stored cookies
     if (!this.hasStoredCookies) {
+      console.log(`[${this.serviceName}] Checking login requirements...`);
       await this.waitForLogin();
     }
     
+    console.log(`[${this.serviceName}] Waiting for ready state...`);
     await this.waitForReady();
+    console.log(`[${this.serviceName}] Initialized and ready!`);
   }
 
   /**
@@ -72,56 +76,75 @@ export abstract class AIServiceAdapter implements IAIService {
     await this.page.waitForTimeout(2000);
 
     // Check if we're on a login page or error page using JavaScript evaluation
-    const isLoginPage = await this.page.evaluate(() => {
-      // @ts-ignore - This code runs in browser context
-      const bodyText = document.body.textContent?.toLowerCase() || '';
-      // @ts-ignore - This code runs in browser context
-      const url = window.location.href.toLowerCase();
-      // @ts-ignore - This code runs in browser context
-      const pageTitle = document.title?.toLowerCase() || '';
-      
-      // Check for Google's specific error messages
-      const hasGoogleError = 
-        bodyText.includes("couldn't sign you in") ||
-        bodyText.includes('this browser or app may not be secure') ||
-        bodyText.includes('browser or app may not be secure') ||
-        url.includes('/signin/rejected') ||
-        url.includes('/signin/challenge');
-      
-      // Check for login-related text
-      const hasLoginText = 
-        bodyText.includes('sign in') ||
-        bodyText.includes('log in') ||
-        bodyText.includes('login') ||
-        bodyText.includes('sign up') ||
-        bodyText.includes('continue with google') ||
-        bodyText.includes('continue with email') ||
-        pageTitle.includes('sign in') ||
-        pageTitle.includes('log in');
-      
-      // Check for login-related URL paths
-      const hasLoginPath = 
-        url.includes('/login') ||
-        url.includes('/signin') ||
-        url.includes('/sign-in') ||
-        url.includes('/auth') ||
-        url.includes('/account') ||
-        url.includes('accounts.google.com');
-      
-      // Check for login form elements
-      // @ts-ignore - This code runs in browser context
-      const hasLoginForm = 
-        // @ts-ignore - This code runs in browser context
-        document.querySelector('input[type="email"]') !== null ||
-        // @ts-ignore - This code runs in browser context
-        document.querySelector('input[type="password"]') !== null ||
-        // @ts-ignore - This code runs in browser context
-        document.querySelector('form')?.querySelector('input[type="password"]') !== null;
-      
-      return hasGoogleError || hasLoginText || hasLoginPath || hasLoginForm;
-    });
+    let isLoginPage = false;
+    // Retry loop for initial check to handle navigation/context destruction
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        if (this.page.isClosed()) return;
+        
+        isLoginPage = await this.page.evaluate(() => {
+          // @ts-ignore - This code runs in browser context
+          const bodyText = document.body.textContent?.toLowerCase() || '';
+          // @ts-ignore - This code runs in browser context
+          const url = window.location.href.toLowerCase();
+          // @ts-ignore - This code runs in browser context
+          const pageTitle = document.title?.toLowerCase() || '';
+          
+          // Check for Google's specific error messages
+          const hasGoogleError = 
+            bodyText.includes("couldn't sign you in") ||
+            bodyText.includes('this browser or app may not be secure') ||
+            bodyText.includes('browser or app may not be secure') ||
+            url.includes('/signin/rejected') ||
+            url.includes('/signin/challenge');
+          
+          // Check for login-related text
+          const hasLoginText = 
+            bodyText.includes('sign in') ||
+            bodyText.includes('log in') ||
+            bodyText.includes('login') ||
+            bodyText.includes('sign up') ||
+            bodyText.includes('continue with google') ||
+            bodyText.includes('continue with email') ||
+            pageTitle.includes('sign in') ||
+            pageTitle.includes('log in');
+          
+          // Check for login-related URL paths
+          const hasLoginPath = 
+            url.includes('/login') ||
+            url.includes('/signin') ||
+            url.includes('/sign-in') ||
+            url.includes('/auth') ||
+            url.includes('/account') ||
+            url.includes('accounts.google.com');
+          
+          // Check for login form elements
+          // @ts-ignore - This code runs in browser context
+          const hasLoginForm = 
+            // @ts-ignore - This code runs in browser context
+            document.querySelector('input[type="email"]') !== null ||
+            // @ts-ignore - This code runs in browser context
+            document.querySelector('input[type="password"]') !== null ||
+            // @ts-ignore - This code runs in browser context
+            document.querySelector('form')?.querySelector('input[type="password"]') !== null;
+          
+          return hasGoogleError || hasLoginText || hasLoginPath || hasLoginForm;
+        });
+        break; // Success
+      } catch (error) {
+        // If context destroyed, wait and retry
+        if (attempt === 2) {
+             console.warn(`[${this.serviceName}] Failed to check login status after 3 attempts: ${error}`);
+             // Assume not login page to prevent blocking, or let it throw?
+             // Letting it throw might be better to signal failure.
+             // But valid flow might be just loaded.
+        }
+        await this.page.waitForTimeout(1000);
+      }
+    }
 
     if (isLoginPage) {
+      console.log(`[${this.serviceName}] Detect login page, waiting for login...`);
       // Wait for the ready selector to appear, which indicates successful login
       // Poll every 2 seconds to check if user has logged in
       const maxWaitTime = 300000; // 5 minutes
@@ -131,9 +154,14 @@ export abstract class AIServiceAdapter implements IAIService {
       
       while (Date.now() - startTime < maxWaitTime) {
         try {
+          if (this.page.isClosed()) {
+             throw new PageOperationError('Page closed during login wait', this.serviceName);
+          }
+
           // Check if URL changed (user might have navigated)
           const currentUrl = this.page.url();
           if (currentUrl !== lastUrl) {
+            console.log(`[${this.serviceName}] URL changed: ${currentUrl}`);
             lastUrl = currentUrl;
             // Wait a bit for new page to load
             await this.page.waitForTimeout(1000);
@@ -144,6 +172,7 @@ export abstract class AIServiceAdapter implements IAIService {
           if (readyElement) {
             const isVisible = await readyElement.isVisible().catch(() => false);
             if (isVisible) {
+              console.log(`[${this.serviceName}] Ready element found and visible!`);
               // Check if we're still on a login page or error page
               const stillOnLoginPage = await this.page.evaluate(() => {
                 // @ts-ignore - This code runs in browser context
@@ -164,7 +193,10 @@ export abstract class AIServiceAdapter implements IAIService {
               
               if (!stillOnLoginPage) {
                 // User has logged in successfully
+                console.log(`[${this.serviceName}] Login successful!`);
                 return;
+              } else {
+                 console.log(`[${this.serviceName}] Ready element visible but still detecting login text/url.`);
               }
             }
           }
@@ -182,36 +214,47 @@ export abstract class AIServiceAdapter implements IAIService {
                 this.selectors.readySelector || this.selectors.textareaSelector,
                 { timeout: 3000, state: 'visible' }
               );
+              console.log(`[${this.serviceName}] Login successful (via URL check and wait)!`);
               return; // Found ready selector, login successful
             } catch {
               // Continue polling
             }
           }
-        } catch {
+        } catch (e) {
+          console.warn(`[${this.serviceName}] Error in polling loop:`, e);
           // Continue polling
+          if (this.page.isClosed()) throw e;
         }
         
         // Wait before next check
-        await this.page.waitForTimeout(pollInterval);
+        if (!this.page.isClosed()) {
+            await this.page.waitForTimeout(pollInterval);
+        }
       }
       
       // Timeout - check if still on login page or error page
-      const stillOnLoginPage = await this.page.evaluate(() => {
-        // @ts-ignore - This code runs in browser context
-        const bodyText = document.body.textContent?.toLowerCase() || '';
-        // @ts-ignore - This code runs in browser context
-        const url = window.location.href.toLowerCase();
-        return (
-          bodyText.includes("couldn't sign you in") ||
-          bodyText.includes('this browser or app may not be secure') ||
-          bodyText.includes('sign in') ||
-          bodyText.includes('log in') ||
-          url.includes('/login') ||
-          url.includes('/signin') ||
-          url.includes('/signin/rejected') ||
-          url.includes('/signin/challenge')
-        );
-      });
+      let stillOnLoginPage = false;
+      try {
+         stillOnLoginPage = await this.page.evaluate(() => {
+            // @ts-ignore - This code runs in browser context
+            const bodyText = document.body.textContent?.toLowerCase() || '';
+            // @ts-ignore - This code runs in browser context
+            const url = window.location.href.toLowerCase();
+            return (
+              bodyText.includes("couldn't sign you in") ||
+              bodyText.includes('this browser or app may not be secure') ||
+              bodyText.includes('sign in') ||
+              bodyText.includes('log in') ||
+              url.includes('/login') ||
+              url.includes('/signin') ||
+              url.includes('/signin/rejected') ||
+              url.includes('/signin/challenge')
+            );
+         });
+      } catch (e) {
+          // If e.g. execution context destroyed here, assume we might be ok or fail.
+          // But likely we timed out.
+      }
 
       if (stillOnLoginPage) {
         // Check if it's a Google security error

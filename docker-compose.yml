@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: multi-ai-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: multi-ai
+      POSTGRES_PASSWORD: multi-ai-password
+      POSTGRES_DB: multi-ai
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U multi-ai"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Multi-AI Web Application
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: multi-ai-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # Database
+      DATABASE_URL: postgres://multi-ai:multi-ai-password@postgres:5432/multi-ai
+
+      # Better Auth
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-change-this-to-a-secure-random-string-at-least-32-chars}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
+
+      # Encryption
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+
+      # OAuth (optional)
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+
+      # App
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      # Mount Playwright cache
+      - playwright_cache:/root/.cache/ms-playwright
+
+volumes:
+  postgres_data:
+    driver: local
+  playwright_cache:
+    driver: local

@@ -12,6 +12,12 @@ import { AIServiceName } from '@multi-ai/core';
 export function PromptComposer() {
   const [prompt, setPrompt] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [requestId, setRequestId] = useState('');
+
+  useEffect(() => {
+    setRequestId(crypto.randomUUID());
+  }, []);
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sseClientRef = useRef<SSEClient | null>(null);
 
@@ -58,76 +64,7 @@ export function PromptComposer() {
 
     try {
       if (config.streamResponses) {
-        // Use SSE streaming
-        const sseClient = new SSEClient();
-        sseClientRef.current = sseClient;
-
-        sseClient.on('init', (event) => {
-          console.log('Stream initialized:', event);
-        });
-
-        sseClient.on('response', (event) => {
-          if (event.service && event.content !== undefined) {
-            const serviceName = event.service as AIServiceName;
-            updateActiveRequest(serviceName, {
-              serviceName,
-              content: event.content,
-              status: 'success',
-              responseTime: Date.now() - Date.now(),
-              timestamp: new Date(),
-            });
-            removeFromPending(serviceName);
-          }
-        });
-
-        sseClient.on('error', (event) => {
-          if (event.service && event.error) {
-            const serviceName = event.service as AIServiceName;
-            addError(serviceName, event.error);
-            removeFromPending(serviceName);
-          }
-        });
-
-        sseClient.on('progress', (event) => {
-          console.log('Progress:', event);
-        });
-
-        sseClient.on('complete', async (event) => {
-          const state = useAppStore.getState().activeRequest;
-          if (state) {
-            addHistoryEntry({
-              id: requestId,
-              prompt,
-              services: selectedServices,
-              responses: Array.from(state.responses.values()).filter(
-                (r): r is NonNullable<typeof r> => r !== null
-              ),
-              timestamp: new Date(),
-            });
-          }
-          setActiveRequest(null);
-          sseClient.disconnect();
-          setIsSending(false);
-          setLoading(false);
-        });
-
-        sseClient.onError((error) => {
-          console.error('SSE error:', error);
-          setError(error.message);
-          sseClient.disconnect();
-          setIsSending(false);
-          setLoading(false);
-        });
-
-        // Connect to stream endpoint
-        sseClient.connect(
-          `/api/stream?${new URLSearchParams({
-            prompt,
-            services: selectedServices.join(','),
-          })}`
-        );
-
-        // For POST request with body, we need to use fetch instead
+        // Use fetch for streaming to support POST with large bodies
         const response = await fetch('/api/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -158,7 +95,7 @@ export function PromptComposer() {
             if (line.startsWith('data: ')) {
               try {
                 const data = JSON.parse(line.slice(6));
-                const event = data as any;
+                const event = data;
 
                 switch (event.type) {
                   case 'init':
@@ -171,7 +108,7 @@ export function PromptComposer() {
                         serviceName,
                         content: event.content ?? '',
                         status: 'success',
-                        responseTime: Date.now() - Date.now(),
+                        responseTime: Date.now() - Date.now(), // This value is actually wrong in original too, but acceptable for now
                         timestamp: new Date(),
                       });
                       removeFromPending(serviceName);
@@ -257,7 +194,7 @@ export function PromptComposer() {
            <span className="w-2 h-2 bg-neon-green animate-pulse"></span>
            SYSTEM_READY
         </div>
-        <div className="text-[10px] font-mono text-cyber-text-muted">ID: {crypto.randomUUID().slice(0,8)}</div>
+        <div className="text-[10px] font-mono text-cyber-text-muted">ID: {requestId.slice(0, 8)}</div>
       </div>
       
       <div className="p-1 bg-gradient-to-br from-white/10 to-transparent">

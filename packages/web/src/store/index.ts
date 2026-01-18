@@ -23,6 +23,15 @@ interface AppState {
   isLoading: boolean;
   error: string | null;
 
+  // Auth state
+  user: {
+    id: string;
+    email: string;
+    name: string | null;
+    image: string | null;
+  } | null;
+  isAuthenticated: boolean;
+
   // Actions
   updateConfig: (config: Partial<AppConfig>) => void;
   setSelectedServices: (services: AIServiceName[]) => void;
@@ -46,6 +55,10 @@ interface AppState {
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   clearError: () => void;
+
+  // Auth actions
+  setUser: (user: AppState['user']) => void;
+  signOut: () => void;
 }
 
 const defaultConfig: AppConfig = {
@@ -64,6 +77,8 @@ export const useAppStore = create<AppState>()(
       activeRequest: null,
       isLoading: false,
       error: null,
+      user: null,
+      isAuthenticated: false,
 
       // Config actions
       updateConfig: (config) =>
@@ -145,6 +160,25 @@ export const useAppStore = create<AppState>()(
       setError: (error) => set({ error }),
 
       clearError: () => set({ error: null }),
+
+      // Auth actions
+      setUser: (user) =>
+        set({
+          user,
+          isAuthenticated: !!user,
+        }),
+
+      signOut: async () => {
+        try {
+          await fetch('/api/auth/sign-out', { method: 'POST' });
+        } catch (error) {
+          console.error('Sign out error:', error);
+        }
+        set({
+          user: null,
+          isAuthenticated: false,
+        });
+      },
     }),
     {
       name: 'multi-ai-storage',
